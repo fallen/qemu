@@ -101,5 +101,8 @@ check: $(CRT) $(SYS) $(TESTCASES)
 		$(SIM) $(SIMFLAGS) ./$$case; \
 	done
 
+check_%: test_%.tst $(CRT) $(SYS)
+	$(SIM) $(SIMFLAGS) $<
+
 clean:
 	$(RM) -fr $(TESTCASES) $(CRT)
