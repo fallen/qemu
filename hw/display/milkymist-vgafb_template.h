@@ -62,6 +62,9 @@ static void glue(draw_line_, BITS)(void *opaque, uint8_t *d, const uint8_t *s,
 
     while (width--) {
         memcpy(&rgb565, s, sizeof(rgb565));
+#ifndef HOST_WORDS_BIGENDIAN
+        rgb565 = bswap16(rgb565);
+#endif
         r = ((rgb565 >> 11) & 0x1f) << 3;
         g = ((rgb565 >>  5) & 0x3f) << 2;
         b = ((rgb565 >>  0) & 0x1f) << 3;
