@@ -1234,5 +1234,8 @@ void lm32_translate_init(void)
     cpu_deba = tcg_global_mem_new(TCG_AREG0,
                     offsetof(CPULM32State, deba),
                     "deba");
+
+#define GEN_HELPER 2
+#include "helper.h"
 }
 
