@@ -60,6 +60,7 @@ typedef struct LM32CPU {
     /*< public >*/
 
     CPULM32State env;
+    const LM32Def *def;
 } LM32CPU;
 
 static inline LM32CPU *lm32_env_get_cpu(CPULM32State *env)

@@ -90,15 +90,6 @@ void lm32_cpu_do_interrupt(CPUState *cs)
     }
 }
 
-typedef struct {
-    const char *name;
-    uint32_t revision;
-    uint8_t num_interrupts;
-    uint8_t num_breakpoints;
-    uint8_t num_watchpoints;
-    uint32_t features;
-} LM32Def;
-
 static const LM32Def lm32_defs[] = {
     {
         .name = "lm32-basic",
@@ -214,11 +205,9 @@ LM32CPU *cpu_lm32_init(const char *cpu_model)
     }
 
     cpu = LM32_CPU(object_new(TYPE_LM32_CPU));
-    env = &cpu->env;
+    cpu->def = def;
 
-    env->features = def->features;
-    env->num_bps = def->num_breakpoints;
-    env->num_wps = def->num_watchpoints;
+    env = &cpu->env;
     env->cfg = cfg_by_def(def);
 
     object_property_set_bool(OBJECT(cpu), true, "realized", NULL);

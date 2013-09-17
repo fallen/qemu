@@ -149,6 +149,15 @@ enum {
     LM32_FLAG_IGNORE_MSB = 1,
 };
 
+typedef struct {
+    const char *name;
+    uint32_t revision;
+    uint8_t num_interrupts;
+    uint8_t num_breakpoints;
+    uint8_t num_watchpoints;
+    uint32_t features;
+} LM32Def;
+
 struct CPULM32State {
     /* general registers */
     uint32_t regs[32];
@@ -177,10 +186,7 @@ struct CPULM32State {
     DeviceState *juart_state;
 
     /* processor core features */
-    uint32_t features;
     uint32_t flags;
-    uint8_t num_bps;
-    uint8_t num_wps;
 
 };
 
