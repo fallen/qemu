@@ -80,7 +80,7 @@ static void sys_write(void *opaque, hwaddr addr,
     case R_PASSFAIL:
         s->regs[addr] = value;
         testname = (char *)s->testname;
-        qemu_log("TC  %-32s %s\n", testname, (value) ? "FAILED" : "OK");
+        fprintf(stderr, "TC  %-32s %s\n", testname, (value) ? "FAILED" : "OK");
         break;
     case R_TESTNAME:
         s->regs[addr] = value;
