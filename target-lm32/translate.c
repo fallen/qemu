@@ -119,6 +119,12 @@ static inline void t_gen_raise_exception(DisasContext *dc, uint32_t index)
     tcg_temp_free_i32(tmp);
 }
 
+static inline void t_gen_illegal_insn(DisasContext *dc)
+{
+    tcg_gen_movi_tl(cpu_pc, dc->pc);
+    gen_helper_ill(cpu_env);
+}
+
 static void gen_goto_tb(DisasContext *dc, int n, target_ulong dest)
 {
     TranslationBlock *tb;
@@ -422,6 +428,7 @@ static void dec_divu(DisasContext *dc)
 
     if (!(dc->def->features & LM32_FEATURE_DIVIDE)) {
         qemu_log_mask(LOG_GUEST_ERROR, "hardware divider is not available\n");
+        t_gen_illegal_insn(dc);
         return;
     }
 
@@ -501,6 +508,7 @@ static void dec_modu(DisasContext *dc)
 
     if (!(dc->def->features & LM32_FEATURE_DIVIDE)) {
         qemu_log_mask(LOG_GUEST_ERROR, "hardware divider is not available\n");
+        t_gen_illegal_insn(dc);
         return;
     }
 
@@ -524,6 +532,7 @@ static void dec_mul(DisasContext *dc)
     if (!(dc->def->features & LM32_FEATURE_MULTIPLY)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                 "hardware multiplier is not available\n");
+        t_gen_illegal_insn(dc);
         return;
     }
 
@@ -592,17 +601,18 @@ static void dec_scall(DisasContext *dc)
         LOG_DIS("scall\n");
     } else if (dc->imm5 == 2) {
         LOG_DIS("break\n");
-    } else {
-        qemu_log_mask(LOG_GUEST_ERROR, "invalid opcode @0x%x", dc->pc);
-        return;
     }
 
     if (dc->imm5 == 7) {
         tcg_gen_movi_tl(cpu_pc, dc->pc);
         t_gen_raise_exception(dc, EXCP_SYSTEMCALL);
-    } else {
+    } else if (dc->imm5 == 2) {
         tcg_gen_movi_tl(cpu_pc, dc->pc);
         t_gen_raise_exception(dc, EXCP_BREAKPOINT);
+    } else {
+        qemu_log_mask(LOG_GUEST_ERROR, "invalid opcode @0x%x", dc->pc);
+        t_gen_illegal_insn(dc);
+        return;
     }
 }
 
@@ -678,6 +688,7 @@ static void dec_sextb(DisasContext *dc)
     if (!(dc->def->features & LM32_FEATURE_SIGN_EXTEND)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                 "hardware sign extender is not available\n");
+        t_gen_illegal_insn(dc);
         return;
     }
 
@@ -691,6 +702,7 @@ static void dec_sexth(DisasContext *dc)
     if (!(dc->def->features & LM32_FEATURE_SIGN_EXTEND)) {
         qemu_log_mask(LOG_GUEST_ERROR,
                 "hardware sign extender is not available\n");
+        t_gen_illegal_insn(dc);
         return;
     }
 
@@ -719,6 +731,7 @@ static void dec_sl(DisasContext *dc)
 
     if (!(dc->def->features & LM32_FEATURE_SHIFT)) {
         qemu_log_mask(LOG_GUEST_ERROR, "hardware shifter is not available\n");
+        t_gen_illegal_insn(dc);
         return;
     }
 
@@ -740,24 +753,32 @@ static void dec_sr(DisasContext *dc)
         LOG_DIS("sr r%d, r%d, r%d\n", dc->r2, dc->r0, dc->r1);
     }
 
-    if (!(dc->def->features & LM32_FEATURE_SHIFT)) {
-        if (dc->format == OP_FMT_RI) {
-            /* TODO: check r1 == 1 during runtime */
-        } else {
-            if (dc->imm5 != 1) {
-                qemu_log_mask(LOG_GUEST_ERROR,
-                        "hardware shifter is not available\n");
-                return;
-            }
-        }
-    }
-
+    /* The real CPU (w/o hardware shifter) only supports right shift by exactly
+     * one bit */
     if (dc->format == OP_FMT_RI) {
+        if (!(dc->def->features & LM32_FEATURE_SHIFT) && (dc->imm5 != 1)) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                    "hardware shifter is not available\n");
+            t_gen_illegal_insn(dc);
+            return;
+        }
         tcg_gen_sari_tl(cpu_R[dc->r1], cpu_R[dc->r0], dc->imm5);
     } else {
-        TCGv t0 = tcg_temp_new();
+        int l1 = gen_new_label();
+        int l2 = gen_new_label();
+        TCGv t0 = tcg_temp_local_new();
         tcg_gen_andi_tl(t0, cpu_R[dc->r1], 0x1f);
+
+        if (!(dc->def->features & LM32_FEATURE_SHIFT)) {
+            tcg_gen_brcondi_tl(TCG_COND_EQ, t0, 1, l1);
+            t_gen_illegal_insn(dc);
+            tcg_gen_br(l2);
+        }
+
+        gen_set_label(l1);
         tcg_gen_sar_tl(cpu_R[dc->r2], cpu_R[dc->r0], t0);
+        gen_set_label(l2);
+
         tcg_temp_free(t0);
     }
 }
@@ -770,24 +791,30 @@ static void dec_sru(DisasContext *dc)
         LOG_DIS("sru r%d, r%d, r%d\n", dc->r2, dc->r0, dc->r1);
     }
 
-    if (!(dc->def->features & LM32_FEATURE_SHIFT)) {
-        if (dc->format == OP_FMT_RI) {
-            /* TODO: check r1 == 1 during runtime */
-        } else {
-            if (dc->imm5 != 1) {
-                qemu_log_mask(LOG_GUEST_ERROR,
-                        "hardware shifter is not available\n");
-                return;
-            }
-        }
-    }
-
     if (dc->format == OP_FMT_RI) {
+        if (!(dc->def->features & LM32_FEATURE_SHIFT) && (dc->imm5 != 1)) {
+            qemu_log_mask(LOG_GUEST_ERROR,
+                    "hardware shifter is not available\n");
+            t_gen_illegal_insn(dc);
+            return;
+        }
         tcg_gen_shri_tl(cpu_R[dc->r1], cpu_R[dc->r0], dc->imm5);
     } else {
-        TCGv t0 = tcg_temp_new();
+        int l1 = gen_new_label();
+        int l2 = gen_new_label();
+        TCGv t0 = tcg_temp_local_new();
         tcg_gen_andi_tl(t0, cpu_R[dc->r1], 0x1f);
+
+        if (!(dc->def->features & LM32_FEATURE_SHIFT)) {
+            tcg_gen_brcondi_tl(TCG_COND_EQ, t0, 1, l1);
+            t_gen_illegal_insn(dc);
+            tcg_gen_br(l2);
+        }
+
+        gen_set_label(l1);
         tcg_gen_shr_tl(cpu_R[dc->r2], cpu_R[dc->r0], t0);
+        gen_set_label(l2);
+
         tcg_temp_free(t0);
     }
 }
@@ -816,6 +843,7 @@ static void dec_user(DisasContext *dc)
     LOG_DIS("user");
 
     qemu_log_mask(LOG_GUEST_ERROR, "user instruction undefined\n");
+    t_gen_illegal_insn(dc);
 }
 
 static void dec_wcsr(DisasContext *dc)
@@ -883,6 +911,7 @@ static void dec_wcsr(DisasContext *dc)
         if (dc->def->num_breakpoints <= no) {
             qemu_log_mask(LOG_GUEST_ERROR,
                     "breakpoint #%i is not available\n", no);
+            t_gen_illegal_insn(dc);
             break;
         }
         gen_helper_wcsr_bp(cpu_env, cpu_R[dc->r1], tcg_const_i32(no));
@@ -895,6 +924,7 @@ static void dec_wcsr(DisasContext *dc)
         if (dc->def->num_watchpoints <= no) {
             qemu_log_mask(LOG_GUEST_ERROR,
                     "watchpoint #%i is not available\n", no);
+            t_gen_illegal_insn(dc);
             break;
         }
         gen_helper_wcsr_wp(cpu_env, cpu_R[dc->r1], tcg_const_i32(no));
@@ -953,6 +983,7 @@ static void dec_xor(DisasContext *dc)
 static void dec_ill(DisasContext *dc)
 {
     qemu_log_mask(LOG_GUEST_ERROR, "invalid opcode 0x%02x\n", dc->opcode);
+    t_gen_illegal_insn(dc);
 }
 
 typedef void (*DecoderInfo)(DisasContext *dc);
