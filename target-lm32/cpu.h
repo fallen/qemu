@@ -1,7 +1,7 @@
 /*
  *  LatticeMico32 virtual CPU header.
  *
- *  Copyright (c) 2010 Michael Walle <michael@walle.cc>
+ *  Copyright (c) 2010-2013 Michael Walle <michael@walle.cc>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -34,13 +34,8 @@ typedef struct CPULM32State CPULM32State;
 
 #define ELF_MACHINE EM_LATTICEMICO32
 
-#define NB_MMU_MODES 1
+#define NB_MMU_MODES 2
 #define TARGET_PAGE_BITS 12
-static inline int cpu_mmu_index(CPULM32State *env)
-{
-    return 0;
-}
-
 #define TARGET_PHYS_ADDR_SPACE_BITS 32
 #define TARGET_VIRT_ADDR_SPACE_BITS 32
 
@@ -53,7 +48,11 @@ enum {
     EXCP_DATA_BUS_ERROR,
     EXCP_DIVIDE_BY_ZERO,
     EXCP_IRQ,
-    EXCP_SYSTEMCALL
+    EXCP_SYSTEMCALL,
+    EXCP_ITLB_MISS,
+    EXCP_DTLB_MISS,
+    EXCP_DTLB_FAULT,
+    EXCP_PRIVILEGE,
 };
 
 /* Registers */
@@ -111,6 +110,33 @@ enum {
     CFG_REV_SHIFT = 26,
 };
 
+/* processor status */
+enum {
+    PSW_IE    = (1<<0),
+    PSW_EIE   = (1<<1),
+    PSW_BIE   = (1<<2),
+    PSW_ITLB  = (1<<3),
+    PSW_EITLB = (1<<4),
+    PSW_BITLB = (1<<5),
+    PSW_DTLB  = (1<<6),
+    PSW_EDTLB = (1<<7),
+    PSW_BDTLB = (1<<8),
+    PSW_USR   = (1<<9),
+    PSW_EUSR  = (1<<10),
+    PSW_BUSR  = (1<<11),
+};
+
+/* TLB commands in TLBVADDR register */
+enum {
+    ITLB_NOP          = 0x00,
+    DTLB_NOP          = 0x01,
+    ITLB_FLUSH        = 0x02,
+    DTLB_FLUSH        = 0x03,
+    ITLB_INVALIDATE   = 0x04,
+    DTLB_INVALIDATE   = 0x05,
+    TLB_CMD_MASK      = 0x0f,
+};
+
 /* CSRs */
 enum {
     CSR_IE   = 0x00,
@@ -133,6 +159,10 @@ enum {
     CSR_WP1  = 0x19,
     CSR_WP2  = 0x1a,
     CSR_WP3  = 0x1b,
+    CSR_PSW  = 0x1d,
+    CSR_TLBVADDR     = 0x1e,
+    CSR_TLBPADDR     = 0x1f,  /* write only */
+    CSR_TLBBADVADDR  = 0x1f,  /* read only */
 };
 
 enum {
@@ -143,6 +173,7 @@ enum {
     LM32_FEATURE_I_CACHE      = 16,
     LM32_FEATURE_D_CACHE      = 32,
     LM32_FEATURE_CYCLE_COUNT  = 64,
+    LM32_FEATURE_MMU          = 128,
 };
 
 enum {
@@ -157,6 +188,16 @@ typedef struct {
     uint8_t num_watchpoints;
     uint32_t features;
 } LM32Def;
+
+typedef struct tlb_t tlb_t;
+struct tlb_t {
+    target_ulong vaddr;
+    target_ulong paddr;
+    uint_fast8_t valid:1;
+    uint_fast8_t ro:1;    /* only valid for DTLB entries */
+};
+
+#define LM32_TLB_ENTRIES 1024
 
 struct CPULM32State {
     /* general registers */
@@ -177,6 +218,16 @@ struct CPULM32State {
 
     CPUBreakpoint * cpu_breakpoint[4];
     CPUWatchpoint * cpu_watchpoint[4];
+
+    uint32_t psw;
+    uint32_t tlbvaddr;
+    uint32_t tlbbadvaddr;
+
+    /* tlb */
+    struct {
+        tlb_t itlb[LM32_TLB_ENTRIES];
+        tlb_t dtlb[LM32_TLB_ENTRIES];
+    } mmu;
 
     CPU_COMMON
 
@@ -240,6 +291,25 @@ static inline CPULM32State *cpu_init(const char *cpu_model)
 #define cpu_gen_code cpu_lm32_gen_code
 #define cpu_signal_handler cpu_lm32_signal_handler
 
+#define MMU_MODE0_SUFFIX _kernel
+#define MMU_MODE1_SUFFIX _user
+#define MMU_KERNEL_IDX  0
+#define MMU_USER_IDX    1
+static inline int cpu_mmu_index(CPULM32State *env)
+{
+    LM32CPU *cpu = lm32_env_get_cpu(env);
+
+    if (!(cpu->def->features & LM32_FEATURE_MMU)) {
+        return MMU_KERNEL_IDX;
+    }
+
+    if (env->psw & PSW_USR) {
+        return MMU_USER_IDX;
+    }
+
+    return MMU_KERNEL_IDX;
+}
+
 int cpu_lm32_handle_mmu_fault(CPULM32State *env, target_ulong address, int rw,
                               int mmu_idx);
 #define cpu_handle_mmu_fault cpu_lm32_handle_mmu_fault
@@ -249,9 +319,16 @@ int cpu_lm32_handle_mmu_fault(CPULM32State *env, target_ulong address, int rw,
 static inline void cpu_get_tb_cpu_state(CPULM32State *env, target_ulong *pc,
                                         target_ulong *cs_base, int *flags)
 {
+    LM32CPU *cpu = lm32_env_get_cpu(env);
+
     *pc = env->pc;
     *cs_base = 0;
-    *flags = 0;
+
+    if (cpu->def->features & LM32_FEATURE_MMU) {
+        *flags = env->psw & (PSW_ITLB | PSW_DTLB | PSW_USR);
+    } else {
+        *flags = 0;
+    }
 }
 
 static inline bool cpu_has_work(CPUState *cpu)
@@ -259,6 +336,21 @@ static inline bool cpu_has_work(CPUState *cpu)
     return cpu->interrupt_request & CPU_INTERRUPT_HARD;
 }
 
+static inline int mmu_tlb_index(CPULM32State *env, target_ulong address)
+{
+    return (address >> TARGET_PAGE_BITS) & (LM32_TLB_ENTRIES - 1);
+}
+
+void mmu_flush_tlb(CPULM32State *env, tlb_t *tlb);
+void mmu_invalidate_tlb(CPULM32State *env, tlb_t *tlb);
+void mmu_fill_tbl(CPULM32State *env, tlb_t *tlb, uint32_t tlbpaddr);
+
 #include "exec/exec-all.h"
 
+static inline void cpu_pc_from_tb(CPULM32State *env, TranslationBlock *tb)
+{
+    env->pc = tb->pc;
+}
+
+void dump_mmu(FILE *f, fprintf_function cpu_fprintf, CPULM32State *env);
 #endif

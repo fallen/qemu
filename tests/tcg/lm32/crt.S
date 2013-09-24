@@ -82,3 +82,42 @@ _system_call_handler:
 	nop
 	nop
 
+_itlb_miss_handler:
+	ori r25, r25, 128
+	rcsr r24, TLBVADDR
+	ret
+	nop
+	nop
+	nop
+	nop
+	nop
+
+_dtlb_miss_handler:
+	ori r25, r25, 256
+	rcsr r24, TLBVADDR
+	addi ra, ea, 4
+	ret
+	nop
+	nop
+	nop
+	nop
+
+_dtlb_fault_handler:
+	ori r25, r25, 512
+	rcsr r24, TLBVADDR
+	addi ra, ea, 4
+	ret
+	nop
+	nop
+	nop
+	nop
+
+_privilege_exception_handler:
+	ori r25, r25, 1024
+	addi ra, ea, 4
+	ret
+	nop
+	nop
+	nop
+	nop
+	nop

@@ -1,7 +1,7 @@
 /*
  *  LatticeMico32 main translation routines.
  *
- *  Copyright (c) 2010 Michael Walle <michael@walle.cc>
+ *  Copyright (c) 2010-2013 Michael Walle <michael@walle.cc>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -52,6 +52,9 @@ static TCGv cpu_dc;
 static TCGv cpu_deba;
 static TCGv cpu_bp[4];
 static TCGv cpu_wp[4];
+static TCGv cpu_psw;
+static TCGv cpu_tlbvaddr;
+static TCGv cpu_tlbbadvaddr;
 
 #include "exec/gen-icount.h"
 
@@ -76,12 +79,12 @@ typedef struct DisasContext {
     uint16_t imm16;
     uint32_t imm26;
 
-    unsigned int delayed_branch;
-    unsigned int tb_flags, synced_flags; /* tb dependent flags.  */
     int is_jmp;
 
     struct TranslationBlock *tb;
     int singlestep_enabled;
+
+    int user;
 } DisasContext;
 
 static const char *regnames[] = {
@@ -198,6 +201,20 @@ static void dec_andhi(DisasContext *dc)
     tcg_gen_andi_tl(cpu_R[dc->r1], cpu_R[dc->r0], (dc->imm16 << 16));
 }
 
+static void gen_restore_reg_bit(TCGv reg, unsigned long bit,
+        unsigned long saved_bit)
+{
+    TCGv t0 = tcg_temp_new();
+    int l1 = gen_new_label();
+
+    tcg_gen_andi_tl(t0, reg, saved_bit);
+    tcg_gen_ori_tl(reg, reg, bit);
+    tcg_gen_brcondi_tl(TCG_COND_EQ, t0, saved_bit, l1);
+    tcg_gen_andi_tl(reg, reg, ~bit);
+    gen_set_label(l1);
+    tcg_temp_free(t0);
+}
+
 static void dec_b(DisasContext *dc)
 {
     if (dc->r0 == R_RA) {
@@ -212,23 +229,21 @@ static void dec_b(DisasContext *dc)
 
     /* restore IE.IE in case of an eret */
     if (dc->r0 == R_EA) {
-        TCGv t0 = tcg_temp_new();
-        int l1 = gen_new_label();
-        tcg_gen_andi_tl(t0, cpu_ie, IE_EIE);
-        tcg_gen_ori_tl(cpu_ie, cpu_ie, IE_IE);
-        tcg_gen_brcondi_tl(TCG_COND_EQ, t0, IE_EIE, l1);
-        tcg_gen_andi_tl(cpu_ie, cpu_ie, ~IE_IE);
-        gen_set_label(l1);
-        tcg_temp_free(t0);
+        gen_restore_reg_bit(cpu_ie, IE_IE, IE_EIE);
+        if (dc->def->features & LM32_FEATURE_MMU) {
+            gen_restore_reg_bit(cpu_psw, PSW_IE, PSW_EIE);
+            gen_restore_reg_bit(cpu_psw, PSW_USR, PSW_EUSR);
+            gen_restore_reg_bit(cpu_psw, PSW_ITLB, PSW_EITLB);
+            gen_restore_reg_bit(cpu_psw, PSW_DTLB, PSW_EDTLB);
+        }
     } else if (dc->r0 == R_BA) {
-        TCGv t0 = tcg_temp_new();
-        int l1 = gen_new_label();
-        tcg_gen_andi_tl(t0, cpu_ie, IE_BIE);
-        tcg_gen_ori_tl(cpu_ie, cpu_ie, IE_IE);
-        tcg_gen_brcondi_tl(TCG_COND_EQ, t0, IE_BIE, l1);
-        tcg_gen_andi_tl(cpu_ie, cpu_ie, ~IE_IE);
-        gen_set_label(l1);
-        tcg_temp_free(t0);
+        gen_restore_reg_bit(cpu_ie, IE_IE, IE_BIE);
+        if (dc->def->features & LM32_FEATURE_MMU) {
+            gen_restore_reg_bit(cpu_psw, PSW_IE, PSW_BIE);
+            gen_restore_reg_bit(cpu_psw, PSW_USR, PSW_BUSR);
+            gen_restore_reg_bit(cpu_psw, PSW_ITLB, PSW_BITLB);
+            gen_restore_reg_bit(cpu_psw, PSW_DTLB, PSW_BDTLB);
+        }
     }
     tcg_gen_mov_tl(cpu_pc, cpu_R[dc->r0]);
 
@@ -651,6 +666,24 @@ static void dec_rcsr(DisasContext *dc)
     case CSR_JRX:
         gen_helper_rcsr_jrx(cpu_R[dc->r2], cpu_env);
         break;
+    case CSR_PSW:
+        if (!(dc->def->features & LM32_FEATURE_MMU)) {
+            goto invalid_read;
+        }
+        tcg_gen_mov_tl(cpu_R[dc->r2], cpu_psw);
+        break;
+    case CSR_TLBVADDR:
+        if (!(dc->def->features & LM32_FEATURE_MMU)) {
+            goto invalid_read;
+        }
+        tcg_gen_mov_tl(cpu_R[dc->r2], cpu_tlbvaddr);
+        break;
+    case CSR_TLBBADVADDR:
+        if (!(dc->def->features & LM32_FEATURE_MMU)) {
+            goto invalid_read;
+        }
+        tcg_gen_mov_tl(cpu_R[dc->r2], cpu_tlbbadvaddr);
+        break;
     case CSR_ICC:
     case CSR_DCC:
     case CSR_BP0:
@@ -661,6 +694,7 @@ static void dec_rcsr(DisasContext *dc)
     case CSR_WP1:
     case CSR_WP2:
     case CSR_WP3:
+invalid_read:
         qemu_log_mask(LOG_GUEST_ERROR, "invalid read access csr=%x\n", dc->csr);
         break;
     default:
@@ -852,6 +886,11 @@ static void dec_wcsr(DisasContext *dc)
 
     LOG_DIS("wcsr r%d, %d\n", dc->r1, dc->csr);
 
+    if (dc->user) {
+        t_gen_raise_exception(dc, EXCP_PRIVILEGE);
+        return;
+    }
+
     switch (dc->csr) {
     case CSR_IE:
         tcg_gen_mov_tl(cpu_ie, cpu_R[dc->r1]);
@@ -929,8 +968,33 @@ static void dec_wcsr(DisasContext *dc)
         }
         gen_helper_wcsr_wp(cpu_env, cpu_R[dc->r1], tcg_const_i32(no));
         break;
+    case CSR_PSW:
+        if (!(dc->def->features & LM32_FEATURE_MMU)) {
+            goto invalid_write;
+        }
+        gen_helper_wcsr_psw(cpu_env, cpu_R[dc->r1]);
+        tcg_gen_movi_tl(cpu_pc, dc->pc + 4);
+        dc->is_jmp = DISAS_UPDATE;
+        break;
+    case CSR_TLBVADDR:
+        if (!(dc->def->features & LM32_FEATURE_MMU)) {
+            goto invalid_write;
+        }
+        gen_helper_wcsr_tlbvaddr(cpu_env, cpu_R[dc->r1]);
+        tcg_gen_movi_tl(cpu_pc, dc->pc + 4);
+        dc->is_jmp = DISAS_UPDATE;
+        break;
+    case CSR_TLBPADDR:
+        if (!(dc->def->features & LM32_FEATURE_MMU)) {
+            goto invalid_write;
+        }
+        gen_helper_wcsr_tlbpaddr(cpu_env, cpu_R[dc->r1]);
+        tcg_gen_movi_tl(cpu_pc, dc->pc + 4);
+        dc->is_jmp = DISAS_UPDATE;
+        break;
     case CSR_CC:
     case CSR_CFG:
+invalid_write:
         qemu_log_mask(LOG_GUEST_ERROR, "invalid write access csr=%x\n",
                 dc->csr);
         break;
@@ -1087,6 +1151,7 @@ void gen_intermediate_code_internal(LM32CPU *cpu,
         max_insns = CF_COUNT_MASK;
     }
 
+    dc->user = (env->psw & PSW_USR) ? 1 : 0;
     gen_tb_start();
     do {
         check_breakpoint(env, dc);
@@ -1197,6 +1262,7 @@ void lm32_cpu_dump_state(CPUState *cs, FILE *f, fprintf_function cpu_fprintf,
     cpu_fprintf(f, "IN: PC=%x %s\n",
                 env->pc, lookup_symbol(env->pc));
 
+    cpu_fprintf(f, "psw=%8.8x\n", env->psw);
     cpu_fprintf(f, "ie=%8.8x (IE=%x EIE=%x BIE=%x) im=%8.8x ip=%8.8x\n",
              env->ie,
              (env->ie & IE_IE) ? 1 : 0,
@@ -1273,6 +1339,15 @@ void lm32_translate_init(void)
     cpu_deba = tcg_global_mem_new(TCG_AREG0,
                     offsetof(CPULM32State, deba),
                     "deba");
+    cpu_psw = tcg_global_mem_new(TCG_AREG0,
+                    offsetof(CPULM32State, psw),
+                    "psw");
+    cpu_tlbvaddr = tcg_global_mem_new(TCG_AREG0,
+                    offsetof(CPULM32State, tlbvaddr),
+                    "tlbvaddr");
+    cpu_tlbbadvaddr = tcg_global_mem_new(TCG_AREG0,
+                    offsetof(CPULM32State, tlbbadvaddr),
+                    "tlbpaddr");
 
 #define GEN_HELPER 2
 #include "helper.h"

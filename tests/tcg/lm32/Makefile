@@ -3,7 +3,8 @@
 CROSS=lm32-elf-
 
 SIM = qemu-system-lm32
-SIMFLAGS = -M lm32-evr -nographic -device lm32-sys -net none -kernel
+SIMFLAGS = -M lm32-evr -cpu lm32-full-mmu -nographic -device lm32-sys \
+		   -net none -kernel
 
 CC      = $(CROSS)gcc
 AS      = $(CROSS)as
@@ -82,6 +83,8 @@ TESTCASES += test_xnor.tst
 TESTCASES += test_xnori.tst
 TESTCASES += test_xor.tst
 TESTCASES += test_xori.tst
+
+TESTCASES += test_mmu.tst
 
 all: build
 

@@ -147,6 +147,46 @@ uint32_t HELPER(rcsr_jrx)(CPULM32State *env)
     return lm32_juart_get_jrx(env->juart_state);
 }
 
+void HELPER(wcsr_psw)(CPULM32State *env, uint32_t psw)
+{
+    env->psw = psw;
+    if (psw & (PSW_ITLB | PSW_DTLB)) {
+        tlb_flush(env, 1);
+    }
+}
+
+void HELPER(wcsr_tlbvaddr)(CPULM32State *env, uint32_t tlbvaddr)
+{
+    env->tlbvaddr = tlbvaddr;
+
+    switch (tlbvaddr & TLB_CMD_MASK) {
+    case ITLB_NOP:
+    case DTLB_NOP:
+        break;
+    case ITLB_INVALIDATE:
+        mmu_invalidate_tlb(env, env->mmu.itlb);
+        break;
+    case DTLB_INVALIDATE:
+        mmu_invalidate_tlb(env, env->mmu.dtlb);
+        break;
+    case ITLB_FLUSH:
+        mmu_flush_tlb(env, env->mmu.itlb);
+        break;
+    case DTLB_FLUSH:
+        mmu_flush_tlb(env, env->mmu.dtlb);
+        break;
+    }
+}
+
+void HELPER(wcsr_tlbpaddr)(CPULM32State *env, uint32_t tlbpaddr)
+{
+    if (tlbpaddr & 1) {
+        mmu_fill_tbl(env, env->mmu.dtlb, tlbpaddr);
+    } else {
+        mmu_fill_tbl(env, env->mmu.itlb, tlbpaddr);
+    }
+}
+
 /* Try to fill the TLB and return an exception if error. If retaddr is
    NULL, it means that the function was called in C code (i.e. not
    from generated code or from helper.c) */

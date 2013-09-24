@@ -1,7 +1,7 @@
 /*
  *  LatticeMico32 helper routines.
  *
- *  Copyright (c) 2010 Michael Walle <michael@walle.cc>
+ *  Copyright (c) 2010-2013 Michael Walle <michael@walle.cc>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -20,21 +20,135 @@
 #include "cpu.h"
 #include "qemu/host-utils.h"
 
-int cpu_lm32_handle_mmu_fault(CPULM32State *env, target_ulong address, int rw,
-                              int mmu_idx)
+static int get_physical_address(LM32CPU *cpu,
+        hwaddr *physical, int *prot, target_ulong address, int rw)
 {
-    int prot;
+    CPULM32State *env = &cpu->env;
+    int idx;
+    bool dtlb = (rw != 2);
+    bool tlb_enabled = (dtlb) ? env->psw & PSW_DTLB : env->psw & PSW_ITLB;
+    tlb_t *tlb;
 
-    address &= TARGET_PAGE_MASK;
-    prot = PAGE_BITS;
-    if (env->flags & LM32_FLAG_IGNORE_MSB) {
-        tlb_set_page(env, address, address & 0x7fffffff, prot, mmu_idx,
-                TARGET_PAGE_SIZE);
+    *prot = 0;
+
+    if (cpu->def->features & LM32_FEATURE_MMU && tlb_enabled) {
+        idx = mmu_tlb_index(env, address);
+
+        if (dtlb) {
+            tlb = &env->mmu.dtlb[idx];
+        } else {
+            tlb = &env->mmu.itlb[idx];
+        }
+
+        if (!tlb->valid) {
+            /* TLB entry not valid */
+            goto tlb_miss;
+        }
+
+        if (((tlb->vaddr ^ address) & 0xffc00000) != 0) {
+            /* TLB frame number mismatch */
+            goto tlb_miss;
+        }
+
+        /* for all ITLB entries ro == 0 */
+        if (tlb->ro && rw == 1) {
+            goto tlb_fault;
+        }
+
+        *physical = tlb->paddr;
+        if (dtlb) {
+            if (tlb->ro) {
+                *prot = PAGE_READ;
+            } else {
+                *prot = PAGE_READ | PAGE_WRITE;
+            }
+        } else {
+            *prot = PAGE_EXEC /* | PAGE_READ */;
+        }
     } else {
-        tlb_set_page(env, address, address, prot, mmu_idx, TARGET_PAGE_SIZE);
+        /* mmu not available or disabled */
+        *physical = address;
+        *prot = PAGE_BITS;
     }
 
     return 0;
+
+tlb_miss:
+    return 1;
+tlb_fault:
+    return 2;
+}
+
+void mmu_fill_tbl(CPULM32State *env, tlb_t *tlb, uint32_t tlbpaddr)
+{
+    int idx = mmu_tlb_index(env, env->tlbvaddr);
+    tlb[idx].vaddr = env->tlbvaddr & TARGET_PAGE_MASK;
+    tlb[idx].paddr = tlbpaddr & TARGET_PAGE_MASK;
+    tlb[idx].valid = 1;
+    tlb[idx].ro = !!(tlbpaddr & 2);
+    tlb_flush_page(env, env->tlbvaddr);
+}
+
+void mmu_flush_tlb(CPULM32State *env, tlb_t *tlb)
+{
+    int idx;
+    for (idx = 0; idx < LM32_TLB_ENTRIES; idx++) {
+        tlb[idx].valid = 0;
+    }
+    tlb_flush(env, 1);
+}
+
+void mmu_invalidate_tlb(CPULM32State *env, tlb_t *tlb)
+{
+    int idx = mmu_tlb_index(env, env->tlbvaddr);
+    tlb[idx].valid = 0;
+    tlb_flush_page(env, tlb[idx].vaddr);
+}
+
+static void raise_mmu_exception(CPULM32State *env, target_ulong address, int rw)
+{
+    /* already preset TLBVADDR and set TLBBADVADDR to miss address */
+    env->tlbvaddr = address & TARGET_PAGE_MASK;
+    env->tlbbadvaddr = address;
+
+    if (rw == 0) {
+        /* preset lower bit, indicating that DTLB is selected on next write
+         * to TLBPADDR */
+        env->tlbvaddr |= 1;
+        env->exception_index = EXCP_DTLB_MISS;
+    } else if (rw == 1) {
+        env->tlbvaddr |= 1;
+        env->exception_index = EXCP_DTLB_FAULT;
+    } else {
+        env->exception_index = EXCP_ITLB_MISS;
+    }
+}
+
+int cpu_lm32_handle_mmu_fault(CPULM32State *env, target_ulong address, int rw,
+                              int mmu_idx)
+{
+    LM32CPU *cpu = lm32_env_get_cpu(env);
+    hwaddr physical;
+    int prot;
+    int ret;
+
+    ret = get_physical_address(cpu, &physical, &prot, address, rw);
+
+    if (!ret) {
+        if (env->flags & LM32_FLAG_IGNORE_MSB) {
+            physical &= 0x7fffffff;
+        }
+
+        tlb_set_page(env, address & TARGET_PAGE_MASK,
+                physical & TARGET_PAGE_MASK, prot, mmu_idx,
+                TARGET_PAGE_SIZE);
+        ret = 0;
+    } else {
+        raise_mmu_exception(env, address, rw);
+        ret = 1;
+    }
+
+    return ret;
 }
 
 hwaddr lm32_cpu_get_phys_page_debug(CPUState *cs, vaddr addr)
@@ -152,10 +266,21 @@ void lm32_cpu_do_interrupt(CPUState *cs)
     case EXCP_DIVIDE_BY_ZERO:
     case EXCP_IRQ:
     case EXCP_SYSTEMCALL:
+    case EXCP_DTLB_MISS:
+    case EXCP_ITLB_MISS:
+    case EXCP_DTLB_FAULT:
+    case EXCP_PRIVILEGE:
         /* non-debug exceptions */
         env->regs[R_EA] = env->pc;
         env->ie |= (env->ie & IE_IE) ? IE_EIE : 0;
         env->ie &= ~IE_IE;
+        if (cpu->def->features & LM32_FEATURE_MMU) {
+            env->psw |= (env->psw & PSW_IE) ? PSW_EIE : 0;
+            env->psw |= (env->psw & PSW_ITLB) ? PSW_EITLB : 0;
+            env->psw |= (env->psw & PSW_DTLB) ? PSW_EDTLB : 0;
+            env->psw |= (env->psw & PSW_USR) ? PSW_EUSR : 0;
+            env->psw &= ~(PSW_IE | PSW_ITLB | PSW_DTLB | PSW_USR);
+        }
         if (env->dc & DC_RE) {
             env->pc = env->deba + (env->exception_index * 32);
         } else {
@@ -169,6 +294,13 @@ void lm32_cpu_do_interrupt(CPUState *cs)
         env->regs[R_BA] = env->pc;
         env->ie |= (env->ie & IE_IE) ? IE_BIE : 0;
         env->ie &= ~IE_IE;
+        if (cpu->def->features & LM32_FEATURE_MMU) {
+            env->psw |= (env->psw & PSW_IE) ? PSW_BIE : 0;
+            env->psw |= (env->psw & PSW_ITLB) ? PSW_BITLB : 0;
+            env->psw |= (env->psw & PSW_DTLB) ? PSW_BDTLB : 0;
+            env->psw |= (env->psw & PSW_USR) ? PSW_BUSR : 0;
+            env->psw &= ~(PSW_IE | PSW_ITLB | PSW_DTLB | PSW_USR);
+        }
         env->pc = env->deba + (env->exception_index * 32);
         log_cpu_state_mask(CPU_LOG_INT, cs, 0);
         break;
@@ -216,7 +348,22 @@ static const LM32Def lm32_defs[] = {
                      | LM32_FEATURE_I_CACHE
                      | LM32_FEATURE_D_CACHE
                      | LM32_FEATURE_CYCLE_COUNT),
-    }
+    },
+    {
+        .name = "lm32-full-mmu",
+        .revision = 3,
+        .num_interrupts = 32,
+        .num_breakpoints = 4,
+        .num_watchpoints = 4,
+        .features = (LM32_FEATURE_MULTIPLY
+                     | LM32_FEATURE_DIVIDE
+                     | LM32_FEATURE_SHIFT
+                     | LM32_FEATURE_SIGN_EXTEND
+                     | LM32_FEATURE_I_CACHE
+                     | LM32_FEATURE_D_CACHE
+                     | LM32_FEATURE_CYCLE_COUNT
+                     | LM32_FEATURE_MMU),
+    },
 };
 
 void cpu_lm32_list(FILE *f, fprintf_function cpu_fprintf)
@@ -274,6 +421,13 @@ static uint32_t cfg_by_def(const LM32Def *def)
         cfg |= CFG_CC;
     }
 
+#if 0
+    /* TODO */
+    if (def->features & LM32_FEATURE_MMU) {
+        cfg |= CFG_MMU;
+    }
+#endif
+
     cfg |= (def->num_interrupts << CFG_INT_SHIFT);
     cfg |= (def->num_breakpoints << CFG_BP_SHIFT);
     cfg |= (def->num_watchpoints << CFG_WP_SHIFT);
@@ -314,4 +468,30 @@ void cpu_lm32_set_phys_msb_ignore(CPULM32State *env, int value)
     } else {
         env->flags &= ~LM32_FLAG_IGNORE_MSB;
     }
+}
+
+static void dump_tlb(FILE *f, fprintf_function cpu_fprintf, CPULM32State *env,
+        tlb_t *tlb)
+{
+    int idx;
+
+    cpu_fprintf(f, "\tIdx     Vaddr       Paddr\n");
+    cpu_fprintf(f, "\t------  ----------  ----------\n");
+    for (idx = 0; idx < LM32_TLB_ENTRIES; idx++) {
+        tlb_t *entry = &tlb[idx];
+        if (entry->valid) {
+            cpu_fprintf(f, "\t0x%04x  0x%08x  0x%08x\n", idx, entry->vaddr,
+                    entry->paddr);
+        }
+    }
+}
+void dump_mmu(FILE *f, fprintf_function cpu_fprintf, CPULM32State *env)
+{
+    cpu_fprintf(f, "ITLB enabled: %s  DTLB enabled: %s\n",
+            env->psw & PSW_ITLB ? "yes" : "no",
+            env->psw & PSW_DTLB ? "yes" : "no");
+    cpu_fprintf(f, "ITLB:\n");
+    dump_tlb(f, cpu_fprintf, env, env->mmu.itlb);
+    cpu_fprintf(f, "\nDTLB:\n");
+    dump_tlb(f, cpu_fprintf, env, env->mmu.dtlb);
 }

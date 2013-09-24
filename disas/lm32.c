@@ -47,7 +47,8 @@ typedef enum {
     LM32_CSR_CC, LM32_CSR_CFG, LM32_CSR_EBA, LM32_CSR_DC, LM32_CSR_DEBA,
     LM32_CSR_CFG2, LM32_CSR_JTX = 0xe, LM32_CSR_JRX, LM32_CSR_BP0,
     LM32_CSR_BP1, LM32_CSR_BP2, LM32_CSR_BP3, LM32_CSR_WP0 = 0x18,
-    LM32_CSR_WP1, LM32_CSR_WP2, LM32_CSR_WP3,
+    LM32_CSR_WP1, LM32_CSR_WP2, LM32_CSR_WP3, LM32_CSR_PSW = 0x1d,
+    LM32_CSR_TLBVADDR, LM32_CSR_TLBPADDR,
 } Lm32CsrNum;
 
 typedef struct {
@@ -77,6 +78,9 @@ static const Lm32CsrInfo lm32_csr_info[] = {
     {LM32_CSR_WP1,  "wp1", },
     {LM32_CSR_WP2,  "wp2", },
     {LM32_CSR_WP3,  "wp3", },
+    {LM32_CSR_PSW,  "psw", },
+    {LM32_CSR_TLBVADDR, "tlbvaddr", },
+    {LM32_CSR_TLBPADDR, "tlbpaddr", },
 };
 
 static const Lm32CsrInfo *find_csr_info(int csr)

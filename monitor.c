@@ -1981,7 +1981,8 @@ static void tlb_info(Monitor *mon, const QDict *qdict)
 
 #endif
 
-#if defined(TARGET_SPARC) || defined(TARGET_PPC) || defined(TARGET_XTENSA)
+#if defined(TARGET_SPARC) || defined(TARGET_PPC) || defined(TARGET_XTENSA) || \
+    defined(TARGET_LM32)
 static void tlb_info(Monitor *mon, const QDict *qdict)
 {
     CPUArchState *env1 = mon_get_cpu();
@@ -2737,7 +2738,7 @@ static mon_cmd_t info_cmds[] = {
         .mhandler.cmd = hmp_info_pci,
     },
 #if defined(TARGET_I386) || defined(TARGET_SH4) || defined(TARGET_SPARC) || \
-    defined(TARGET_PPC) || defined(TARGET_XTENSA)
+    defined(TARGET_PPC) || defined(TARGET_XTENSA) || defined(TARGET_LM32)
     {
         .name       = "tlb",
         .args_type  = "",

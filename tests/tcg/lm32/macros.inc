@@ -7,6 +7,7 @@ tn_\name:
 	mvhi r13, hi(tn_\name)
 	ori r13, r13, lo(tn_\name)
 	sw (r12+8), r13
+_\name:
 .endm
 
 .macro load reg val
@@ -27,12 +28,23 @@ tn_\name:
 .macro check_r3 val
 	mvhi r13, hi(\val)
 	ori r13, r13, lo(\val)
-	be r3, r13, 1f
+	be r3, r13, 991f
 	tc_fail
-	bi 2f
-1:
+	bi 992f
+991:
 	tc_pass
-2:
+992:
+.endm
+
+.macro check_reg reg val
+	mvhi r13, hi(\val)
+	ori r13, r13, lo(\val)
+	be \reg, r13, 991f
+	tc_fail
+	bi 992f
+991:
+	tc_pass
+992:
 .endm
 
 .macro check_mem adr val
@@ -41,22 +53,35 @@ tn_\name:
 	mvhi r14, hi(\val)
 	ori r14, r14, lo(\val)
 	lw r13, (r13+0)
-	be r13, r14, 1f
+	be r13, r14, 991f
 	tc_fail
-	bi 2f
-1:
+	bi 992f
+991:
 	tc_pass
-2:
+992:
 .endm
 
 .macro check_excp excp
 	andi r13, r25, \excp
-	bne r13, r0, 1f
+	mv r25, r0
+	bne r13, r0, 991f
 	tc_fail
-	bi 2f
-1:
+	bi 992f
+991:
 	tc_pass
-2:
+992:
+.endm
+
+.macro check_csr csr val
+	mvhi r13, hi(\val)
+	ori r13, r13, lo(\val)
+    rcsr r14, \csr
+	be r13, r14, 991f
+	tc_fail
+	bi 992f
+991:
+	tc_pass
+992:
 .endm
 
 .macro start
