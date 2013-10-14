@@ -105,13 +105,13 @@ void mmu_invalidate_tlb(CPULM32State *env, tlb_t *tlb)
     tlb_flush_page(env, tlb[idx].vaddr);
 }
 
-static void raise_mmu_exception(CPULM32State *env, target_ulong address, int rw)
+static void raise_mmu_exception(CPULM32State *env, target_ulong address, int rw, int fault)
 {
     /* already preset TLBVADDR and set TLBBADVADDR to miss address */
     env->tlbvaddr = address & TARGET_PAGE_MASK;
     env->tlbbadvaddr = address;
 
-    if (rw == 0) {
+    if (rw == 0 || ((rw == 1) && (fault == 0))) {
         /* preset lower bit, indicating that DTLB is selected on next write
          * to TLBPADDR */
         env->tlbvaddr |= 1;
@@ -144,7 +144,7 @@ int cpu_lm32_handle_mmu_fault(CPULM32State *env, target_ulong address, int rw,
                 TARGET_PAGE_SIZE);
         ret = 0;
     } else {
-        raise_mmu_exception(env, address, rw);
+        raise_mmu_exception(env, address, rw, ret == 2);
         ret = 1;
     }
 
