@@ -275,11 +275,10 @@ void lm32_cpu_do_interrupt(CPUState *cs)
         env->ie |= (env->ie & IE_IE) ? IE_EIE : 0;
         env->ie &= ~IE_IE;
         if (cpu->def->features & LM32_FEATURE_MMU) {
-            env->psw |= (env->psw & PSW_IE) ? PSW_EIE : 0;
             env->psw |= (env->psw & PSW_ITLB) ? PSW_EITLB : 0;
             env->psw |= (env->psw & PSW_DTLB) ? PSW_EDTLB : 0;
             env->psw |= (env->psw & PSW_USR) ? PSW_EUSR : 0;
-            env->psw &= ~(PSW_IE | PSW_ITLB | PSW_DTLB | PSW_USR);
+            env->psw &= ~(PSW_ITLB | PSW_DTLB | PSW_USR);
         }
         if (env->dc & DC_RE) {
             env->pc = env->deba + (env->exception_index * 32);
@@ -295,11 +294,10 @@ void lm32_cpu_do_interrupt(CPUState *cs)
         env->ie |= (env->ie & IE_IE) ? IE_BIE : 0;
         env->ie &= ~IE_IE;
         if (cpu->def->features & LM32_FEATURE_MMU) {
-            env->psw |= (env->psw & PSW_IE) ? PSW_BIE : 0;
             env->psw |= (env->psw & PSW_ITLB) ? PSW_BITLB : 0;
             env->psw |= (env->psw & PSW_DTLB) ? PSW_BDTLB : 0;
             env->psw |= (env->psw & PSW_USR) ? PSW_BUSR : 0;
-            env->psw &= ~(PSW_IE | PSW_ITLB | PSW_DTLB | PSW_USR);
+            env->psw &= ~(PSW_ITLB | PSW_DTLB | PSW_USR);
         }
         env->pc = env->deba + (env->exception_index * 32);
         log_cpu_state_mask(CPU_LOG_INT, cs, 0);

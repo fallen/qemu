@@ -75,9 +75,10 @@ enum {
 
 /* IE flags */
 enum {
-    IE_IE  = (1<<0),
-    IE_EIE = (1<<1),
-    IE_BIE = (1<<2),
+    IE_IE   = (1<<0),
+    IE_EIE  = (1<<1),
+    IE_BIE  = (1<<2),
+    IE_MASK = 0x7,
 };
 
 /* DC flags */
@@ -124,6 +125,7 @@ enum {
     PSW_USR   = (1<<9),
     PSW_EUSR  = (1<<10),
     PSW_BUSR  = (1<<11),
+    PSW_MASK  = 0xfff,
 };
 
 /* TLB commands in TLBVADDR register */

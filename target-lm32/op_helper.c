@@ -149,7 +149,8 @@ uint32_t HELPER(rcsr_jrx)(CPULM32State *env)
 
 void HELPER(wcsr_psw)(CPULM32State *env, uint32_t psw)
 {
-    env->psw = psw;
+    env->psw = psw & PSW_MASK & ~IE_MASK;
+
     if (psw & (PSW_ITLB | PSW_DTLB)) {
         tlb_flush(env, 1);
     }

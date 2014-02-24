@@ -56,6 +56,14 @@ static TCGv cpu_psw;
 static TCGv cpu_tlbvaddr;
 static TCGv cpu_tlbbadvaddr;
 
+/*
+ * Note about IE and PSW:
+ *  IE is shadowed within PSW. We assume that only the lower three bits are
+ *  used in the IE register. On a PSW read we just or PSW and IE. On a PSW
+ *  write the lower three bits goes into the IE register, all other bits are
+ *  written to the PSW register.
+ */
+
 #include "exec/gen-icount.h"
 
 enum {
@@ -231,7 +239,6 @@ static void dec_b(DisasContext *dc)
     if (dc->r0 == R_EA) {
         gen_restore_reg_bit(cpu_ie, IE_IE, IE_EIE);
         if (dc->def->features & LM32_FEATURE_MMU) {
-            gen_restore_reg_bit(cpu_psw, PSW_IE, PSW_EIE);
             gen_restore_reg_bit(cpu_psw, PSW_USR, PSW_EUSR);
             gen_restore_reg_bit(cpu_psw, PSW_ITLB, PSW_EITLB);
             gen_restore_reg_bit(cpu_psw, PSW_DTLB, PSW_EDTLB);
@@ -239,7 +246,6 @@ static void dec_b(DisasContext *dc)
     } else if (dc->r0 == R_BA) {
         gen_restore_reg_bit(cpu_ie, IE_IE, IE_BIE);
         if (dc->def->features & LM32_FEATURE_MMU) {
-            gen_restore_reg_bit(cpu_psw, PSW_IE, PSW_BIE);
             gen_restore_reg_bit(cpu_psw, PSW_USR, PSW_BUSR);
             gen_restore_reg_bit(cpu_psw, PSW_ITLB, PSW_BITLB);
             gen_restore_reg_bit(cpu_psw, PSW_DTLB, PSW_BDTLB);
@@ -670,7 +676,7 @@ static void dec_rcsr(DisasContext *dc)
         if (!(dc->def->features & LM32_FEATURE_MMU)) {
             goto invalid_read;
         }
-        tcg_gen_mov_tl(cpu_R[dc->r2], cpu_psw);
+        tcg_gen_or_tl(cpu_R[dc->r2], cpu_psw, cpu_ie);
         break;
     case CSR_TLBVADDR:
         if (!(dc->def->features & LM32_FEATURE_MMU)) {
@@ -893,7 +899,7 @@ static void dec_wcsr(DisasContext *dc)
 
     switch (dc->csr) {
     case CSR_IE:
-        tcg_gen_mov_tl(cpu_ie, cpu_R[dc->r1]);
+        tcg_gen_andi_tl(cpu_ie, cpu_R[dc->r1], IE_MASK);
         tcg_gen_movi_tl(cpu_pc, dc->pc + 4);
         dc->is_jmp = DISAS_UPDATE;
         break;
@@ -972,6 +978,8 @@ static void dec_wcsr(DisasContext *dc)
         if (!(dc->def->features & LM32_FEATURE_MMU)) {
             goto invalid_write;
         }
+        /* IE_IE, IE_EIE and IE_BIE are shadowed from/to the IE register */
+        tcg_gen_andi_tl(cpu_ie, cpu_R[dc->r1], IE_MASK);
         gen_helper_wcsr_psw(cpu_env, cpu_R[dc->r1]);
         tcg_gen_movi_tl(cpu_pc, dc->pc + 4);
         dc->is_jmp = DISAS_UPDATE;
@@ -1262,7 +1270,7 @@ void lm32_cpu_dump_state(CPUState *cs, FILE *f, fprintf_function cpu_fprintf,
     cpu_fprintf(f, "IN: PC=%x %s\n",
                 env->pc, lookup_symbol(env->pc));
 
-    cpu_fprintf(f, "psw=%8.8x\n", env->psw);
+    cpu_fprintf(f, "psw=%8.8x\n", env->psw | env->ie);
     cpu_fprintf(f, "ie=%8.8x (IE=%x EIE=%x BIE=%x) im=%8.8x ip=%8.8x\n",
              env->ie,
              (env->ie & IE_IE) ? 1 : 0,
