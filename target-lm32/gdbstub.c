@@ -47,7 +47,7 @@ int lm32_cpu_gdb_read_register(CPUState *cs, uint8_t *mem_buf, int n)
         case 38:
             return gdb_get_reg32(mem_buf, lm32_pic_get_ip(env->pic_state));
 	case 39:
-		return gdb_get_reg32(mem_buf, env->psw);
+		return gdb_get_reg32(mem_buf, env->psw | env->ie);
 	case 40:
 		return gdb_get_reg32(mem_buf, env->tlbvaddr);
 	case 41:
