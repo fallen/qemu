@@ -242,6 +242,7 @@ static void dec_b(DisasContext *dc)
             gen_restore_reg_bit(cpu_psw, PSW_USR, PSW_EUSR);
             gen_restore_reg_bit(cpu_psw, PSW_ITLB, PSW_EITLB);
             gen_restore_reg_bit(cpu_psw, PSW_DTLB, PSW_EDTLB);
+            gen_helper_asid_latching(cpu_env);
         }
     } else if (dc->r0 == R_BA) {
         gen_restore_reg_bit(cpu_ie, IE_IE, IE_BIE);

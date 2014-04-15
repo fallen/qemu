@@ -125,7 +125,9 @@ enum {
     PSW_USR   = (1<<9),
     PSW_EUSR  = (1<<10),
     PSW_BUSR  = (1<<11),
-    PSW_MASK  = 0xfff,
+    PSW_ASID_MASK = 0x1f000,
+    PSW_ASID_SHIFT = 12,
+    PSW_MASK  = 0x1ffff,
 };
 
 /* TLB commands in TLBVADDR register */
@@ -136,7 +138,9 @@ enum {
     DTLB_FLUSH        = 0x03,
     ITLB_INVALIDATE   = 0x04,
     DTLB_INVALIDATE   = 0x05,
+    TLB_ASID_SHIFT    = 7,
     TLB_CMD_MASK      = 0x0f,
+    TLB_ASID_MASK     = 0xf80,
 };
 
 /* CSRs */
@@ -195,6 +199,7 @@ typedef struct tlb_t tlb_t;
 struct tlb_t {
     target_ulong vaddr;
     target_ulong paddr;
+    uint8_t      asid;
     uint_fast8_t valid:1;
     uint_fast8_t ro:1;    /* only valid for DTLB entries */
 };
@@ -222,6 +227,7 @@ struct CPULM32State {
     CPUWatchpoint * cpu_watchpoint[4];
 
     uint32_t psw;
+    uint8_t  asid_latch;
     uint32_t tlbvaddr;
     uint32_t tlbbadvaddr;
 

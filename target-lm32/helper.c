@@ -25,6 +25,7 @@ static int get_physical_address(LM32CPU *cpu,
 {
     CPULM32State *env = &cpu->env;
     int idx;
+    uint8_t current_asid;
     bool dtlb = (rw != 2);
     bool tlb_enabled = (dtlb) ? env->psw & PSW_DTLB : env->psw & PSW_ITLB;
     tlb_t *tlb;
@@ -48,6 +49,12 @@ static int get_physical_address(LM32CPU *cpu,
         if (((tlb->vaddr ^ address) & 0xffc00000) != 0) {
             /* TLB frame number mismatch */
             goto tlb_miss;
+        }
+
+        current_asid = (env->psw & PSW_ASID_MASK) >> PSW_ASID_SHIFT;
+        if (tlb->asid != current_asid) {
+           printf("[qemu] asid missmatch. current == %d, tlbe asid == %d\n", current_asid, tlb->asid);
+           goto tlb_miss;
         }
 
         /* for all ITLB entries ro == 0 */
@@ -86,6 +93,7 @@ void mmu_fill_tbl(CPULM32State *env, tlb_t *tlb, uint32_t tlbpaddr)
     tlb[idx].paddr = tlbpaddr & TARGET_PAGE_MASK;
     tlb[idx].valid = 1;
     tlb[idx].ro = !!(tlbpaddr & 2);
+    tlb[idx].asid = (env->tlbvaddr & TLB_ASID_MASK) >> TLB_ASID_SHIFT;
     tlb_flush_page(env, env->tlbvaddr);
 }
 
