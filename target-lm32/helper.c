@@ -53,8 +53,10 @@ static int get_physical_address(LM32CPU *cpu,
 
         current_asid = (env->psw & PSW_ASID_MASK) >> PSW_ASID_SHIFT;
         if (tlb->asid != current_asid) {
-           printf("[qemu] asid missmatch. current == %d, tlbe asid == %d\n", current_asid, tlb->asid);
-           goto tlb_miss;
+           if ( (tlb->asid != 0) || ((env->psw & PSW_USR) != 0)) {
+             printf("[qemu] asid missmatch. current == %d, tlbe asid == %d, PSW == %08x\n", current_asid, tlb->asid, env->psw | env->ie);
+             goto tlb_miss;
+          }
         }
 
         /* for all ITLB entries ro == 0 */
@@ -94,6 +96,7 @@ void mmu_fill_tbl(CPULM32State *env, tlb_t *tlb, uint32_t tlbpaddr)
     tlb[idx].valid = 1;
     tlb[idx].ro = !!(tlbpaddr & 2);
     tlb[idx].asid = (env->tlbvaddr & TLB_ASID_MASK) >> TLB_ASID_SHIFT;
+    printf("tlb[%08x] <- vaddr %08x paddr %08x valid 1 ro %d asid %d\n", idx, tlb[idx].vaddr, tlb[idx].paddr, tlb[idx].ro, tlb[idx].asid);
     tlb_flush_page(env, env->tlbvaddr);
 }
 
@@ -115,8 +118,9 @@ void mmu_invalidate_tlb(CPULM32State *env, tlb_t *tlb)
 
 static void raise_mmu_exception(CPULM32State *env, target_ulong address, int rw, int fault)
 {
+    uint8_t asid = ((env->psw & PSW_ASID_MASK) >> PSW_ASID_SHIFT);
     /* already preset TLBVADDR and set TLBBADVADDR to miss address */
-    env->tlbvaddr = address & TARGET_PAGE_MASK;
+    env->tlbvaddr = (address & TARGET_PAGE_MASK) | (asid << TLB_ASID_SHIFT);
     env->tlbbadvaddr = address;
 
     if (rw == 0 || ((rw == 1) && (fault == 0))) {

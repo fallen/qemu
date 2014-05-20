@@ -149,20 +149,12 @@ uint32_t HELPER(rcsr_jrx)(CPULM32State *env)
 
 void HELPER(wcsr_psw)(CPULM32State *env, uint32_t psw)
 {
+    uint32_t previous_asid = (env->psw & PSW_ASID_MASK);
+    uint32_t new_asid = psw & PSW_ASID_MASK;
     env->psw = psw & PSW_MASK & ~IE_MASK;
-    if ( psw & (PSW_ITLB | PSW_DTLB) ) {
+    if ( ( psw & (PSW_ITLB | PSW_DTLB) )
+        || ( new_asid != previous_asid ) ) {
         tlb_flush(env, 1);
-    }
-    env->asid_latch = (psw & PSW_ASID_MASK) >> PSW_ASID_SHIFT;
-}
-
-void HELPER(asid_latching)(CPULM32State *env)
-{
-    if (env->asid_latch != ((env->psw & PSW_ASID_MASK) >> PSW_ASID_SHIFT))
-    {
-      env->psw &= ~PSW_ASID_MASK;
-      env->psw |= PSW_ASID_MASK & (env->asid_latch << PSW_ASID_SHIFT);
-      tlb_flush(env, 1);
     }
 }
 

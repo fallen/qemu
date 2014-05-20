@@ -227,7 +227,6 @@ struct CPULM32State {
     CPUWatchpoint * cpu_watchpoint[4];
 
     uint32_t psw;
-    uint8_t  asid_latch;
     uint32_t tlbvaddr;
     uint32_t tlbbadvaddr;
 
