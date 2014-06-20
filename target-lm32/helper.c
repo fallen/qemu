@@ -96,7 +96,6 @@ void mmu_fill_tbl(CPULM32State *env, tlb_t *tlb, uint32_t tlbpaddr)
     tlb[idx].valid = 1;
     tlb[idx].ro = !!(tlbpaddr & 2);
     tlb[idx].asid = (env->tlbvaddr & TLB_ASID_MASK) >> TLB_ASID_SHIFT;
-    printf("tlb[%08x] <- vaddr %08x paddr %08x valid 1 ro %d asid %d\n", idx, tlb[idx].vaddr, tlb[idx].paddr, tlb[idx].ro, tlb[idx].asid);
     tlb_flush_page(env, env->tlbvaddr);
 }
 
