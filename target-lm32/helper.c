@@ -484,12 +484,12 @@ static void dump_tlb(FILE *f, fprintf_function cpu_fprintf, CPULM32State *env,
 {
     int idx;
 
-    cpu_fprintf(f, "\tIdx     Vaddr       Paddr\n");
-    cpu_fprintf(f, "\t------  ----------  ----------\n");
+    cpu_fprintf(f, "\tIdx     ASID Vaddr       Paddr\n");
+    cpu_fprintf(f, "\t------  ---- ----------  ----------\n");
     for (idx = 0; idx < LM32_TLB_ENTRIES; idx++) {
         tlb_t *entry = &tlb[idx];
         if (entry->valid) {
-            cpu_fprintf(f, "\t0x%04x  0x%08x  0x%08x\n", idx, entry->vaddr,
+            cpu_fprintf(f, "\t0x%04x 0x%02x 0x%08x  0x%08x\n", idx, entry->asid, entry->vaddr,
                     entry->paddr);
         }
     }
